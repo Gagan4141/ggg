@@ -1,5 +1,5 @@
 let invoice;
-const $=s=>document.querySelector(s); const esc=s=>String(s??'').replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));
+const $=s=>document.querySelector(s); const esc=s=>String(s??'').replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 $('#file').onchange=e=>e.target.files[0]&&upload(e.target.files[0]);
 const drop=$('#drop'); ['dragenter','dragover'].forEach(x=>drop.addEventListener(x,e=>{e.preventDefault();drop.classList.add('over')}));['dragleave','drop'].forEach(x=>drop.addEventListener(x,e=>{e.preventDefault();drop.classList.remove('over')}));drop.addEventListener('drop',e=>e.dataTransfer.files[0]&&upload(e.dataTransfer.files[0]));
 async function upload(file){ $('#status').innerHTML='<div class="progress"><b>Uploading…</b><span>Reading document → Extracting invoice data → Detecting line items → Building Excel layout</span></div>';let fd=new FormData();fd.append('file',file);try{let r=await fetch('/api/process',{method:'POST',body:fd}),j=await r.json();if(!r.ok)throw Error(j.detail);show(j)}catch(e){$('#status').innerHTML=`<div class="error">${esc(e.message)}</div>`}}
