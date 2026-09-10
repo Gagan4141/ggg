@@ -39,3 +39,11 @@ pytest -q
 ```
 
 Tests exercise demo processing, CSV export, workbook generation/opening, invalid file types, and malformed PDF handling.
+
+### OCR diagnostics and failure responses
+
+`GET /health/ocr` reports the selected provider and whether an OpenAI key is configured. It never returns the key or attempts an API call. Server logs record provider selection, key presence only, safe OpenAI request error metadata, response validity, and extraction validation errors.
+
+`POST /api/process` returns a structured error detail with a `code` and safe `message` when OCR cannot proceed. The codes are `ocr_api_key_missing`, `ocr_authentication_failed`, `ocr_request_failed`, `ocr_model_response_failed`, `structured_extraction_failed`, and `document_unreadable`. A successful response has `status: "success"`.
+
+For OpenAI OCR, set `OCR_PROVIDER=openai`, `OPENAI_API_KEY`, and optionally `OPENAI_MODEL` (default: `gpt-4.1-mini`). The health endpoint verifies configuration only; an actual upload is still required to verify API access and model availability.
