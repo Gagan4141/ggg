@@ -1,6 +1,7 @@
-"""OCR provider boundary with a Vercel-compatible hosted OCR backend."""
+"""OCR provider boundary with an OpenAI vision backend for Vercel."""
 from __future__ import annotations
 
+import base64
 import os
 from abc import ABC, abstractmethod
 from io import BytesIO
@@ -29,45 +30,72 @@ class LocalTesseractProvider(OCRProvider):
             return ""
 
 
-class OCRSpaceProvider(OCRProvider):
-    """Hosted OCR.Space backend; suitable for Vercel serverless functions."""
-
-    endpoint = "https://api.ocr.space/parse/image"
+class OpenAIOCRProvider(OCRProvider):
+    """Use an OpenAI vision model to transcribe bills and invoices."""
 
     def process_document(self, content: bytes, mime_type: str) -> str:
-        api_key = os.getenv("OCR_SPACE_API_KEY")
+        api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             return ""
 
         try:
-            import requests
+            from openai import OpenAI
 
-            filename = "document.pdf" if mime_type == "application/pdf" else "document.png"
-            response = requests.post(
-                self.endpoint,
-                headers={"apikey": api_key},
-                files={"file": (filename, content, mime_type)},
-                data={
-                    "language": "eng",
-                    "isOverlayRequired": "false",
-                    "isTable": "true",
-                    "detectOrientation": "true",
-                    "scale": "true",
-                    "OCREngine": "2",
-                },
-                timeout=45,
+            client = OpenAI(api_key=api_key)
+            model = os.getenv("OPENAI_MODEL", "gpt-5.6-luna")
+            prompt = (
+                "Read this bill or invoice carefully and transcribe all useful visible text. "
+                "Preserve invoice numbers, dates, GSTINs, supplier/customer names, line items, "
+                "quantities, prices, taxes, discounts, and totals. Keep table rows readable. "
+                "Do not invent or correct values; if text is unclear, reproduce what is visible "
+                "or omit it. Return only the transcription, with no commentary."
             )
-            response.raise_for_status()
-            payload = response.json()
-            if payload.get("IsErroredOnProcessing"):
-                return ""
-            return "\n".join(
-                item.get("ParsedText", "")
-                for item in payload.get("ParsedResults", [])
-                if item.get("ParsedText")
-            ).strip()
+
+            if mime_type == "application/pdf":
+                data = base64.b64encode(content).decode("ascii")
+                response = client.responses.create(
+                    model=model,
+                    input=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "input_text", "text": prompt},
+                                {
+                                    "type": "input_file",
+                                    "filename": "bill.pdf",
+                                    "file_data": data,
+                                },
+                            ],
+                        }
+                    ],
+                )
+            else:
+                data = base64.b64encode(content).decode("ascii")
+                data_url = f"data:{mime_type};base64,{data}"
+                response = client.responses.create(
+                    model=model,
+                    input=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "input_text", "text": prompt},
+                                {
+                                    "type": "input_image",
+                                    "image_url": data_url,
+                                    "detail": "high",
+                                },
+                            ],
+                        }
+                    ],
+                )
+
+            return (response.output_text or "").strip()
         except Exception:
             return ""
+
+
+# Backward-compatible alias for deployments that still refer to the old name.
+OCRSpaceProvider = OpenAIOCRProvider
 
 
 def get_ocr_provider() -> OCRProvider:
@@ -75,12 +103,14 @@ def get_ocr_provider() -> OCRProvider:
 
     if provider == "none":
         return NullOCRProvider()
+    if provider in {"openai", "chatgpt", "gpt"}:
+        return OpenAIOCRProvider()
     if provider in {"ocrspace", "ocr.space"}:
-        return OCRSpaceProvider()
+        return OpenAIOCRProvider()
     if provider == "tesseract":
         return LocalTesseractProvider()
 
-    # Vercel/cloud default: hosted OCR when an API key is configured.
-    if os.getenv("OCR_SPACE_API_KEY"):
-        return OCRSpaceProvider()
+    # Vercel/cloud default: OpenAI when an API key is configured.
+    if os.getenv("OPENAI_API_KEY"):
+        return OpenAIOCRProvider()
     return LocalTesseractProvider()
